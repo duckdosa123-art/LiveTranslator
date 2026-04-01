@@ -1,0 +1,31 @@
+# Environment variables
+.env           # Your local secrets (copy .env.example to .env)
+!.env.example  # But keep the template
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+venv/
+.venv/
+
+# Node packages (optional - can be regenerated with npm install)
+node_modules/
+
+# Model files (managed by Git LFS)
+# models/small/*  ← tracked by git lfs
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# IDE settings (keep for consistent dev experience)
+.vscode/settings.json
+.vscode/launch.json
+
+# User-specific settings
+ear_settings.json
+
+# Agent guidelines (internal)
+AGENTS.md

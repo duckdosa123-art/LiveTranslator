@@ -1,0 +1,6 @@
+{
+  "include": ["."],
+  "extraPaths": ["venv/Lib/site-packages"],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic"
+}

@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Translator Overlay</title>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: transparent !important;
+            background-color: transparent !important;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+        }
+
+        #container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: transparent;
+        }
+
+        #caption-box {
+            position: fixed;
+            left: 50%;
+            top: 80%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, var(--bg-opacity, 0.3));
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-radius: calc(12px * var(--caption-scale, 1));
+            padding: calc(14px * var(--caption-scale, 1)) calc(24px * var(--caption-scale, 1));
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: calc(8px * var(--caption-scale, 1));
+            width: auto;
+            max-width: var(--container-width, 800px);
+            cursor: grab;
+            pointer-events: auto;
+            border: var(--border-width, 1px) solid rgba(255, 255, 255, 0.15);
+            box-shadow: 
+                inset 0 1px 0 rgba(255, 255, 255, 0.1),
+                0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        #caption-box.text-only {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border-color: transparent !important;
+            box-shadow: none !important;
+        }
+
+        #caption-box.visible {
+            opacity: 1;
+        }
+
+        #caption-box.fade-out {
+            opacity: 0;
+        }
+
+        #caption-box.locked {
+            cursor: default;
+            pointer-events: none;
+        }
+
+        #caption-original {
+            color: var(--text-sub, #bf94ff);
+            font-size: calc(18px * var(--caption-scale, 1));
+            font-weight: 600;
+            text-align: center;
+            word-wrap: break-word;
+            white-space: normal;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8);
+        }
+
+        #caption-translated {
+            color: var(--text-main, #ffffff);
+            font-size: calc(22px * var(--caption-scale, 1));
+            font-weight: 700;
+            text-align: center;
+            word-wrap: break-word;
+            white-space: normal;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.8);
+        }
+
+        #settings-btn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            width: 40px;
+            height: 40px;
+            background: rgba(10, 10, 20, 0.8);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: #fff;
+            cursor: pointer;
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            z-index: 10000;
+        }
+
+        #settings-btn:hover {
+            background: rgba(145, 70, 255, 0.9);
+            border-color: #9146ff;
+            box-shadow: 0 0 20px rgba(145, 70, 255, 0.5);
+        }
+
+        #settings-btn.hidden {
+            opacity: 0;
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        .ui-element {
+            z-index: 99999;
+        }
+
+        #settings-btn svg {
+            width: 22px;
+            height: 22px;
+            fill: currentColor;
+        }
+
+        #settings-panel {
+            position: fixed;
+            top: 60px;
+            right: 10px;
+            width: 300px;
+            background: rgba(10, 10, 20, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 24px;
+            display: none;
+            z-index: 99999;
+            color: #fff;
+            font-size: 12px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        #settings-panel::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #settings-panel::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #settings-panel::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
+        #settings-panel.open {
+            display: block;
+        }
+
+        #settings-panel h3 {
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #settings-panel .close-btn {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 18px;
+            cursor: pointer;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+
+        #settings-panel .close-btn:hover {
+            color: #fff;
+        }
+
+        .setting-group {
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .setting-group:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .setting-group h4 {
+            font-size: 10px;
+            font-weight: 600;
+            color: #9146ff;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 16px;
+        }
+
+        .setting-group label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .setting-group .value {
+            color: #9146ff;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .setting-group .reset-btn {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            padding: 4px;
+            margin-left: 6px;
+            display: flex;
+            align-items: center;
+            transition: color 0.2s;
+        }
+
+        .setting-group .reset-btn:hover {
+            color: #9146ff;
+        }
+
+        .setting-group .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .setting-group .toggle-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .setting-group .toggle-label {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .setting-group .toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 11px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .setting-group .toggle.active {
+            background: #9146ff;
+        }
+
+        .setting-group .toggle::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 16px;
+            height: 16px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .setting-group .toggle.active::after {
+            transform: translateX(18px);
+        }
+
+        .setting-group input[type="range"] {
+            width: 100%;
+            height: 4px;
+            appearance: none;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .setting-group input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #9146ff;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 8px rgba(145, 70, 255, 0.5);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .setting-group input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+            box-shadow: 0 2px 16px rgba(145, 70, 255, 0.8);
+        }
+
+        .setting-group input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #9146ff;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 8px rgba(145, 70, 255, 0.5);
+        }
+
+        .setting-group input[type="color"] {
+            width: 100%;
+            height: 36px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            cursor: pointer;
+            background: transparent;
+            padding: 2px;
+        }
+
+        .setting-group input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        .setting-group input[type="color"]::-webkit-color-swatch {
+            border: none;
+            border-radius: 6px;
+        }
+
+        .lock-section {
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            padding-top: 20px;
+            margin-top: 8px;
+        }
+
+        .lock-section h4 {
+            font-size: 10px;
+            font-weight: 600;
+            color: #9146ff;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 16px;
+        }
+
+        #lock-overlay-btn {
+            width: 100%;
+            padding: 14px;
+            background: rgba(145, 70, 255, 0.15);
+            border: 1px solid rgba(145, 70, 255, 0.3);
+            border-radius: 10px;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #lock-overlay-btn:hover {
+            background: rgba(145, 70, 255, 0.35);
+            border-color: #9146ff;
+            box-shadow: 0 0 20px rgba(145, 70, 255, 0.4);
+        }
+
+        #lock-overlay-btn.locked {
+            background: #9146ff;
+            border-color: #9146ff;
+        }
+
+        #lock-overlay-btn.locked:hover {
+            box-shadow: 0 0 25px rgba(145, 70, 255, 0.6);
+        }
+
+        #reset-position-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #reset-position-btn:hover {
+            background: rgba(145, 70, 255, 0.2);
+            border-color: rgba(145, 70, 255, 0.4);
+            color: #fff;
+            box-shadow: 0 0 15px rgba(145, 70, 255, 0.3);
+        }
+
+        #factory-reset-btn {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255, 80, 80, 0.1);
+            border: 1px solid rgba(255, 80, 80, 0.3);
+            border-radius: 10px;
+            color: rgba(255, 120, 120, 0.9);
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #factory-reset-btn:hover {
+            background: rgba(255, 80, 80, 0.25);
+            border-color: rgba(255, 80, 80, 0.6);
+            color: #ff4444;
+            box-shadow: 0 0 20px rgba(255, 60, 60, 0.5), 0 0 40px rgba(255, 60, 60, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container">
+        <div id="caption-box">
+            <div id="caption-original"></div>
+            <div id="caption-translated"></div>
+        </div>
+    </div>
+
+    <button id="settings-btn" class="ui-element" title="Settings">
+        <svg viewBox="0 0 24 24">
+            <path
+                d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
+        </svg>
+    </button>
+
+        <div id="settings-panel" class="ui-element">
+        <h3>
+            Settings
+            <button class="close-btn" id="close-settings">&times;</button>
+        </h3>
+
+        <div class="setting-group">
+            <h4>Appearance</h4>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Text Only</span>
+                <div class="toggle" id="text-only-toggle"></div>
+            </div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Hide Settings Icon</span>
+                <div class="toggle" id="hide-icon-toggle"></div>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <h4>Colors</h4>
+            
+            <label>
+                <span>Background</span>
+            </label>
+            <input type="color" id="bg-color" value="#000000">
+            
+            <label style="margin-top: 12px;">
+                <span>Border</span>
+            </label>
+            <input type="color" id="border-color" value="#9146ff">
+            
+            <label style="margin-top: 12px;">
+                <span>Text</span>
+            </label>
+            <input type="color" id="text-color" value="#ffffff">
+        </div>
+
+        <div class="setting-group">
+            <h4>Size</h4>
+            
+            <label>
+                <span>Opacity</span>
+                <span class="value" id="opacity-value">30%</span>
+            </label>
+            <input type="range" id="opacity" min="0" max="100" value="30">
+            
+            <label style="margin-top: 16px;">
+                <span>Scale</span>
+                <span class="value" id="scale-value">1.0x</span>
+                <button class="reset-btn" id="reset-scale-btn" title="Reset">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                        <path d="M3 3v5h5"/>
+                    </svg>
+                </button>
+            </label>
+            <input type="range" id="scale" min="0.5" max="2.0" value="1.0" step="0.1">
+            
+            <label style="margin-top: 16px;">
+                <span>Width</span>
+                <span class="value" id="boxwidth-value">800px</span>
+                <button class="reset-btn" id="reset-width-btn" title="Reset">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                        <path d="M3 3v5h5"/>
+                    </svg>
+                </button>
+            </label>
+            <input type="range" id="boxwidth" min="300" max="1200" value="800" step="50">
+        </div>
+
+        <div class="lock-section">
+            <h4>Controls</h4>
+            <button id="lock-overlay-btn">Lock Overlay</button>
+            <button id="reset-position-btn">Centre Caption</button>
+        </div>
+
+        <div class="lock-section">
+            <button id="factory-reset-btn" style="background: rgba(255, 80, 80, 0.15); border-color: rgba(255, 80, 80, 0.3); color: #ff8080;">Restore Defaults</button>
+        </div>
+    </div>
+
+    <script>
+        class TranslatorOverlay {
+            constructor() {
+                this.socket = null;
+                this.captionBox = document.getElementById('caption-box');
+                this.settingsPanel = document.getElementById('settings-panel');
+                this.settingsBtn = document.getElementById('settings-btn');
+                this.closeSettingsBtn = document.getElementById('close-settings');
+                this.lockBtn = document.getElementById('lock-overlay-btn');
+                this.resetPositionBtn = document.getElementById('reset-position-btn');
+                this.originalText = document.getElementById('caption-original');
+                this.translatedText = document.getElementById('caption-translated');
+                this.fadeTimeout = null;
+                this.isLocked = false;
+
+                this.settings = {
+                    opacity: 30,
+                    containerWidth: 800,
+                    captionScale: 1.0,
+                    bgColor: '#000000',
+                    borderColor: '#9146ff',
+                    textColor: '#ffffff',
+                    textOnly: false,
+                    hideIcon: false,
+                    centerX: null,
+                    centerY: null,
+                    isLocked: false
+                };
+
+                this.SNAP_THRESHOLD = 30;
+
+                this.isDragging = false;
+                this.initialMouseX = 0;
+                this.initialMouseY = 0;
+                this.initialBoxX = 0;
+                this.initialBoxY = 0;
+
+                this.init();
+            }
+
+            init() {
+                this.loadSettings();
+                this.applySettings();
+                this.connectSocket();
+                this.initDrag();
+                this.initSettings();
+                this.restorePosition();
+                this.settingsBtn.style.display = 'flex';
+                this.updateLockState();
+            }
+
+            connectSocket() {
+                const socketUrl = 'http://localhost:5050';
+
+                this.socket = io(socketUrl, {
+                    transports: ['websocket', 'polling'],
+                    reconnection: true,
+                    reconnectionAttempts: Infinity,
+                    reconnectionDelay: 1000
+                });
+
+                this.socket.on('display-caption', (data) => {
+                    this.showCaption(data);
+                });
+            }
+
+            initDrag() {
+                let dragInitialized = false;
+
+                this.captionBox.addEventListener('mousedown', (e) => {
+                    if (this.isLocked) return;
+                    if (e.target.closest('#settings-panel') || e.target.closest('#settings-btn')) return;
+
+                    if (!dragInitialized) {
+                        dragInitialized = true;
+                    }
+
+                    this.isDragging = true;
+                    this.captionBox.style.cursor = 'grabbing';
+
+                    const rect = this.captionBox.getBoundingClientRect();
+                    this.initialBoxX = rect.left + rect.width / 2;
+                    this.initialBoxY = rect.top + rect.height / 2;
+                    this.initialMouseX = e.clientX;
+                    this.initialMouseY = e.clientY;
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!this.isDragging) return;
+
+                    const deltaX = e.clientX - this.initialMouseX;
+                    const deltaY = e.clientY - this.initialMouseY;
+                    let x = this.initialBoxX + deltaX;
+                    let y = this.initialBoxY + deltaY;
+
+                    const centerX = window.innerWidth / 2;
+                    const centerY = window.innerHeight / 2;
+                    const snap = this.SNAP_THRESHOLD;
+
+                    if (Math.abs(x - centerX) < snap) x = centerX;
+                    if (Math.abs(y - centerY) < snap) y = centerY;
+
+                    this.captionBox.style.left = x + 'px';
+                    this.captionBox.style.top = y + 'px';
+                    this.captionBox.style.transform = 'translate(-50%, -50%)';
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (this.isDragging) {
+                        this.isDragging = false;
+                        this.captionBox.style.cursor = 'grab';
+                        this.savePosition();
+                    }
+                });
+            }
+
+            initSettings() {
+                const textOnlyToggle = document.getElementById('text-only-toggle');
+                const hideIconToggle = document.getElementById('hide-icon-toggle');
+                const opacitySlider = document.getElementById('opacity');
+                const bgColorPicker = document.getElementById('bg-color');
+                const borderColorPicker = document.getElementById('border-color');
+                const textColorPicker = document.getElementById('text-color');
+                const factoryResetBtn = document.getElementById('factory-reset-btn');
+
+                textOnlyToggle.addEventListener('click', () => {
+                    this.settings.textOnly = !this.settings.textOnly;
+                    textOnlyToggle.classList.toggle('active', this.settings.textOnly);
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                hideIconToggle.addEventListener('click', () => {
+                    this.settings.hideIcon = !this.settings.hideIcon;
+                    hideIconToggle.classList.toggle('active', this.settings.hideIcon);
+                    this.settingsBtn.classList.toggle('hidden', this.settings.hideIcon);
+                    this.saveSettings();
+                });
+
+                factoryResetBtn.addEventListener('click', () => {
+                    localStorage.clear();
+                    window.location.reload();
+                });
+
+                opacitySlider.addEventListener('input', (e) => {
+                    this.settings.opacity = parseInt(e.target.value);
+                    document.getElementById('opacity-value').textContent = e.target.value + '%';
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                bgColorPicker.addEventListener('input', (e) => {
+                    this.settings.bgColor = e.target.value;
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                borderColorPicker.addEventListener('input', (e) => {
+                    this.settings.borderColor = e.target.value;
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                textColorPicker.addEventListener('input', (e) => {
+                    this.settings.textColor = e.target.value;
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                const boxWidthSlider = document.getElementById('boxwidth');
+                const resetWidthBtn = document.getElementById('reset-width-btn');
+                const scaleSlider = document.getElementById('scale');
+                const resetScaleBtn = document.getElementById('reset-scale-btn');
+
+                boxWidthSlider.addEventListener('input', (e) => {
+                    this.settings.containerWidth = parseInt(e.target.value);
+                    document.getElementById('boxwidth-value').textContent = e.target.value + 'px';
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                resetWidthBtn.addEventListener('click', () => {
+                    this.settings.containerWidth = 800;
+                    boxWidthSlider.value = 800;
+                    document.getElementById('boxwidth-value').textContent = '800px';
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                scaleSlider.addEventListener('input', (e) => {
+                    this.settings.captionScale = parseFloat(e.target.value);
+                    document.getElementById('scale-value').textContent = this.settings.captionScale.toFixed(1) + 'x';
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                resetScaleBtn.addEventListener('click', () => {
+                    this.settings.captionScale = 1.0;
+                    scaleSlider.value = 1.0;
+                    document.getElementById('scale-value').textContent = '1.0x';
+                    this.applySettings();
+                    this.saveSettings();
+                });
+
+                this.settingsBtn.addEventListener('click', () => {
+                    this.settingsPanel.classList.toggle('open');
+                });
+
+                this.closeSettingsBtn.addEventListener('click', () => {
+                    this.settingsPanel.classList.remove('open');
+                });
+
+                this.lockBtn.addEventListener('click', () => {
+                    this.isLocked = !this.isLocked;
+                    this.updateLockState();
+                    this.saveSettings();
+                });
+
+                this.resetPositionBtn.addEventListener('click', () => {
+                    this.settings.centerX = null;
+                    this.settings.centerY = null;
+                    this.saveSettings();
+                    this.restorePosition();
+                });
+            }
+
+            updateLockState() {
+                if (this.isLocked) {
+                    this.captionBox.classList.add('locked');
+                    this.captionBox.style.cursor = 'default';
+                    this.lockBtn.textContent = 'Unlock Overlay';
+                    this.lockBtn.classList.add('locked');
+                    this.settingsPanel.classList.remove('open');
+                } else {
+                    this.captionBox.classList.remove('locked');
+                    this.captionBox.style.cursor = 'grab';
+                    this.lockBtn.textContent = 'Lock Overlay';
+                    this.lockBtn.classList.remove('locked');
+                }
+            }
+
+            restorePosition() {
+                const cx = this.settings.centerX;
+                const cy = this.settings.centerY;
+                
+                if (cx !== null && cy !== null) {
+                    this.captionBox.style.left = cx + 'px';
+                    this.captionBox.style.top = cy + 'px';
+                    this.captionBox.style.transform = 'translate(-50%, -50%)';
+                } else {
+                    this.captionBox.style.left = '50%';
+                    this.captionBox.style.top = '80%';
+                    this.captionBox.style.bottom = 'auto';
+                    this.captionBox.style.transform = 'translate(-50%, -50%)';
+                }
+            }
+
+            applySettings() {
+                this.captionBox.style.background = `rgba(${this.hexToRgb(this.settings.bgColor)}, ${this.settings.opacity / 100})`;
+                this.captionBox.style.borderColor = this.settings.borderColor;
+                this.captionBox.style.setProperty('--text-main', this.settings.textColor);
+                this.captionBox.style.setProperty('--text-sub', this.adjustColor(this.settings.textColor, -30));
+                this.captionBox.style.setProperty('--container-width', this.settings.containerWidth + 'px');
+                this.captionBox.style.setProperty('--caption-scale', this.settings.captionScale);
+
+                this.captionBox.classList.toggle('text-only', this.settings.textOnly);
+            }
+
+            hexToRgb(hex) {
+                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return result 
+                    ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` 
+                    : '0, 0, 0';
+            }
+
+            adjustColor(hex, amount) {
+                const num = parseInt(hex.slice(1), 16);
+                const r = Math.min(255, Math.max(0, (num >> 16) + amount));
+                const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + amount));
+                const b = Math.min(255, Math.max(0, (num & 0x0000FF) + amount));
+                return '#' + (0x1000000 + (r << 16) + (g << 8) + b).toString(16).slice(1);
+            }
+
+            showCaption(data) {
+                if (this.fadeTimeout) {
+                    clearTimeout(this.fadeTimeout);
+                }
+
+                this.originalText.textContent = data.original || '';
+                this.translatedText.textContent = data.translated || '';
+
+                this.captionBox.classList.remove('fade-out');
+                this.captionBox.classList.add('visible');
+
+                this.fadeTimeout = setTimeout(() => {
+                    this.captionBox.classList.remove('visible');
+                    this.captionBox.classList.add('fade-out');
+                }, 6000);
+            }
+
+            savePosition() {
+                const left = parseFloat(this.captionBox.style.left);
+                const top = parseFloat(this.captionBox.style.top);
+                
+                if (isNaN(left) || isNaN(top)) {
+                    this.settings.centerX = null;
+                    this.settings.centerY = null;
+                } else {
+                    this.settings.centerX = left;
+                    this.settings.centerY = top;
+                }
+                this.saveSettings();
+            }
+
+            saveSettings() {
+                localStorage.setItem('translatorOverlay', JSON.stringify(this.settings));
+            }
+
+            loadSettings() {
+                const params = new URLSearchParams(window.location.search);
+                const forceUnlock = params.has('unlock');
+
+                if (forceUnlock) {
+                    this.isLocked = false;
+                    return;
+                }
+
+                const saved = localStorage.getItem('translatorOverlay');
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        this.settings = { ...this.settings, ...parsed };
+
+                        document.getElementById('text-only-toggle').classList.toggle('active', this.settings.textOnly);
+                        document.getElementById('hide-icon-toggle').classList.toggle('active', this.settings.hideIcon);
+                        this.settingsBtn.classList.toggle('hidden', this.settings.hideIcon);
+
+                        document.getElementById('opacity').value = this.settings.opacity;
+                        document.getElementById('opacity-value').textContent = this.settings.opacity + '%';
+
+                        document.getElementById('bg-color').value = this.settings.bgColor;
+                        document.getElementById('border-color').value = this.settings.borderColor;
+                        document.getElementById('text-color').value = this.settings.textColor;
+
+                        document.getElementById('boxwidth').value = this.settings.containerWidth;
+                        document.getElementById('boxwidth-value').textContent = this.settings.containerWidth + 'px';
+
+                        document.getElementById('scale').value = this.settings.captionScale;
+                        document.getElementById('scale-value').textContent = this.settings.captionScale.toFixed(1) + 'x';
+
+                        if (parsed.isLocked !== undefined) {
+                            this.isLocked = parsed.isLocked;
+                        }
+                    } catch (e) { }
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            new TranslatorOverlay();
+        });
+    </script>
+</body>
+
+</html>

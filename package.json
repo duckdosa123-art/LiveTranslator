@@ -1,0 +1,12 @@
+{
+  "name": "live-translator",
+  "version": "1.0.0",
+  "description": "Real-time speech-to-text translation overlay for OBS using Faster-Whisper",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.4"
+  }
+}
