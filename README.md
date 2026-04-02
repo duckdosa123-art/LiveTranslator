@@ -2,11 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Real-time speech-to-text translation overlay for OBS using Faster-Whisper. Translates Brazilian Portuguese to English live.
+Real-time speech-to-text translation overlay for OBS using Faster-Whisper. Translates ALL LANGUAGES to English live.
 
 ## Features
 
-- Real-time speech recognition (pt-BR → en)
+- Real-time speech recognition (FOR Ex: pt-BR → en)
 - Multiple Whisper model support (tiny, small, medium, large-v2, large-v3)
 - Draggable caption overlay with center-anchored positioning
 - Snap-to-center when dragging near screen middle
