@@ -11,7 +11,7 @@ Real-time speech-to-text translation overlay for OBS using Faster-Whisper. Trans
 - Draggable caption overlay with center-anchored positioning
 - Snap-to-center when dragging near screen middle
 - Lock mode for OBS capture
-- Elite glassmorphism styling with backdrop blur
+- Styling with backdrop blur
 - Customizable colors (background, border, text)
 - Proportional scaling (0.5x to 2.0x)
 - Ghost mode for invisible settings in OBS
